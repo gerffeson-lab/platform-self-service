@@ -1,0 +1,21 @@
+# Valida o catálogo de produtos e os scripts do self-service. No PR de produto novo, é o
+# que garante que o catálogo está bem formado e que o formulário foi regenerado.
+name: catalogo
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Catálogo bem formado e formulário em dia
+        run: python3 -I scripts/render_form.py --check
+      - name: Testes dos scripts
+        run: python3 -I -m unittest discover -s tests -v

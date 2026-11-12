@@ -1,21 +1,25 @@
-# Mecanismo de criação de serviços do golden path.
-# Interfaces: Issue Form (label "aprovado") hoje; workflow_dispatch para qualquer outra
-# (Azure Boards via relay, portal IDP etc.) sem mudar este workflow.
+# Mecanismo de criação de serviços do golden path: validar -> aprovar -> criar.
+#
+# Interfaces: Issue Form (abrir ou editar a issue) hoje; workflow_dispatch para qualquer
+# outra (Azure Boards via relay, portal IDP etc.) sem mudar este workflow.
+#
+# Aprovação: o job "aprovar" usa o environment "aprovacao". Sem required reviewers, o pedido
+# válido segue direto (modelo A). Com reviewers, fica aguardando a plataforma (modelo B).
 name: scaffold-service
 
 on:
   issues:
-    types: [labeled]
+    types: [opened, edited, reopened]
   workflow_dispatch:
     inputs:
       nome:
-        description: "Nome do serviço (ex.: pagamentos-api)"
+        description: "Nome do serviço (ex.: cartoes-autorizador)"
         required: true
       produto:
-        description: "Produto (ex.: cartoes)"
+        description: "Produto do catálogo (ex.: cartoes)"
         required: true
       time:
-        description: "Time responsável, slug do time no GitHub (ex.: pagamentos)"
+        description: "Time responsável do produto (ex.: pagamentos)"
         required: true
       work-item:
         description: "Work item (AB#123)"
@@ -30,25 +34,35 @@ permissions:
 
 concurrency:
   group: scaffold-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  ORG: ${{ github.repository_owner }}
+  ISSUE_NUMBER: ${{ github.event.issue.number }}
 
 jobs:
-  scaffold:
+  validar:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.label.name == 'aprovado' && contains(github.event.issue.labels.*.name, 'novo-servico'))
+      (github.event.issue.state == 'open' &&
+       contains(github.event.issue.labels.*.name, 'novo-servico') &&
+       !contains(github.event.issue.labels.*.name, 'servico-criado'))
     runs-on: ubuntu-latest
-    # A chave da GitHub App fica num secret deste environment: só este job a enxerga.
     environment: scaffold
+    outputs:
+      valido: ${{ steps.resultado.outputs.valido }}
+      nome: ${{ steps.req.outputs.nome }}
+      produto: ${{ steps.req.outputs.produto }}
+      system: ${{ steps.req.outputs.system }}
+      time: ${{ steps.req.outputs.time }}
+      work_item: ${{ steps.req.outputs.work_item }}
+      descricao: ${{ steps.req.outputs.descricao }}
     env:
-      ORG: ${{ github.repository_owner }}
-      # public (POC em org Free) | internal (GitHub Enterprise) | private
-      VISIBILITY: ${{ vars.NEW_REPO_VISIBILITY || 'public' }}
-      TEMPLATE_REPO: ${{ github.repository_owner }}/platform-java-boilerplate
-      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ERRORS_FILE: /tmp/erros-pedido.md
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ler e validar o pedido
+      - name: Validar regras e catálogo
         id: req
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -58,7 +72,9 @@ jobs:
           IN_TIME: ${{ inputs.time }}
           IN_WORK_ITEM: ${{ inputs.work-item }}
           IN_DESCRICAO: ${{ inputs.descricao }}
-        run: python3 -I scripts/parse_request.py >> "$GITHUB_OUTPUT"
+        run: |
+          : > "$ERRORS_FILE"
+          python3 -I scripts/validate_request.py catalogo/produtos.yaml >> "$GITHUB_OUTPUT"
 
       # Token de curta duração da GitHub App da plataforma (sem PAT pessoal).
       - name: Token da GitHub App
@@ -69,26 +85,101 @@ jobs:
           private-key: ${{ secrets.PLATFORM_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      - name: Verificar pré-condições
+      - name: Validar no GitHub (time, quem pediu, repositório)
+        id: gh
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           NAME: ${{ steps.req.outputs.nome }}
           TEAM: ${{ steps.req.outputs.time }}
+          REQUESTER: ${{ github.event.issue.user.login || github.actor }}
         run: |
-          if ! gh api "orgs/$ORG/teams/$TEAM" --silent 2>/dev/null; then
-            echo "::error::O time '$TEAM' não existe na organização $ORG."
+          if [ -n "$TEAM" ]; then
+            if ! gh api "orgs/$ORG/teams/$TEAM" --silent 2>/dev/null; then
+              echo "- O time \`$TEAM\` não existe na organização." >> "$ERRORS_FILE"
+            else
+              role=$(gh api "orgs/$ORG/teams/$TEAM/memberships/$REQUESTER" \
+                --jq 'select(.state == "active") | .role' 2>/dev/null || true)
+              if [ "$role" != "maintainer" ]; then
+                echo "- @$REQUESTER não é maintainer do time \`$TEAM\`. Só os maintainers (tech leads) do time podem pedir serviços para ele." >> "$ERRORS_FILE"
+                echo "nao_autorizado=true" >> "$GITHUB_OUTPUT"
+              fi
+            fi
+          fi
+          if [ -n "$NAME" ] && gh repo view "$ORG/$NAME" >/dev/null 2>&1; then
+            echo "- O repositório \`$ORG/$NAME\` já existe." >> "$ERRORS_FILE"
+          fi
+
+      - name: Resultado da validação
+        id: resultado
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          NAO_AUTORIZADO: ${{ steps.gh.outputs.nao_autorizado }}
+        run: |
+          if [ ! -s "$ERRORS_FILE" ]; then
+            echo "valido=true" >> "$GITHUB_OUTPUT"
+            if [ "$EVENT_NAME" = "issues" ]; then
+              gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label pedido-invalido >/dev/null 2>&1 || true
+              gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                --body "✅ Pedido válido. Criando o repositório; o link aparece aqui em instantes."
+            fi
+            exit 0
+          fi
+
+          echo "valido=false" >> "$GITHUB_OUTPUT"
+          { echo "### Pedido inválido"; cat "$ERRORS_FILE"; } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$EVENT_NAME" != "issues" ]; then
+            cat "$ERRORS_FILE"
             exit 1
           fi
-          if gh repo view "$ORG/$NAME" >/dev/null 2>&1; then
-            echo "::error::O repositório $ORG/$NAME já existe."
-            exit 1
+
+          if [ "$NAO_AUTORIZADO" = "true" ]; then
+            body=$(printf '⛔ **Pedido não autorizado.**\n\n%s\n\nPeça ao tech lead do time para abrir o pedido.' "$(cat "$ERRORS_FILE")")
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body"
+            gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason "not planned"
+          else
+            body=$(printf '❌ **Pedido inválido.** Corrija editando esta issue; a validação roda de novo automaticamente.\n\n%s' "$(cat "$ERRORS_FILE")")
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body"
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label pedido-invalido
           fi
+
+  # Gate de aprovação: sem reviewers no environment, passa direto.
+  aprovar:
+    needs: validar
+    if: needs.validar.outputs.valido == 'true'
+    runs-on: ubuntu-latest
+    environment: aprovacao
+    steps:
+      - run: echo "Pedido liberado pelo environment 'aprovacao'."
+
+  criar:
+    needs: [validar, aprovar]
+    runs-on: ubuntu-latest
+    environment: scaffold
+    env:
+      TEMPLATE_REPO: ${{ github.repository_owner }}/platform-java-boilerplate
+      # public (POC em org Free) | internal (GitHub Enterprise) | private
+      VISIBILITY: ${{ vars.NEW_REPO_VISIBILITY || 'public' }}
+      NAME: ${{ needs.validar.outputs.nome }}
+      PRODUCT: ${{ needs.validar.outputs.produto }}
+      SYSTEM: ${{ needs.validar.outputs.system }}
+      TEAM: ${{ needs.validar.outputs.time }}
+      WORK_ITEM: ${{ needs.validar.outputs.work_item }}
+      DESC: ${{ needs.validar.outputs.descricao }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Token da GitHub App
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.PLATFORM_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
 
       - name: Criar repositório a partir do boilerplate
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          NAME: ${{ steps.req.outputs.nome }}
-          DESC: ${{ steps.req.outputs.descricao }}
         run: |
           case "$VISIBILITY" in
             public|internal|private) ;;
@@ -104,14 +195,10 @@ jobs:
       - name: Personalizar (nome, pacote Java, time) e criar branches do GitFlow
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          NAME: ${{ steps.req.outputs.nome }}
-          PRODUCT: ${{ steps.req.outputs.produto }}
-          TEAM: ${{ steps.req.outputs.time }}
-          WORK_ITEM: ${{ steps.req.outputs.work_item }}
         run: |
           gh auth setup-git
           git clone "https://github.com/$ORG/$NAME.git" work
-          python3 -I scripts/rename_service.py work --name "$NAME" --product "$PRODUCT" --org "$ORG" --team "$TEAM"
+          python3 -I scripts/rename_service.py work --name "$NAME" --system "$SYSTEM" --org "$ORG" --team "$TEAM"
           cd work
           git config user.name "platform-bot"
           git config user.email "platform-bot@users.noreply.github.com"
@@ -126,36 +213,33 @@ jobs:
       - name: Dar acesso de escrita ao time
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          NAME: ${{ steps.req.outputs.nome }}
-          TEAM: ${{ steps.req.outputs.time }}
         run: gh api -X PUT "orgs/$ORG/teams/$TEAM/repos/$ORG/$NAME" -f permission=push --silent
 
       - name: Aplicar regras de branch (main e develop só via PR)
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          NAME: ${{ steps.req.outputs.nome }}
         run: gh api -X POST "repos/$ORG/$NAME/rulesets" --input rulesets/gitflow.json --silent
 
-      - name: Responder na issue
+      - name: Avisar o time e fechar o pedido
         if: github.event_name == 'issues'
         env:
           GH_TOKEN: ${{ github.token }}
-          NAME: ${{ steps.req.outputs.nome }}
-          TEAM: ${{ steps.req.outputs.time }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "✅ Repositório criado: https://github.com/$ORG/$NAME
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "🚀 Repositório criado: https://github.com/$ORG/$NAME
 
-          - Time responsável: @$ORG/$TEAM (escrita e CODEOWNERS).
-          - Branch padrão: \`develop\` (GitFlow). \`main\` e \`develop\` só recebem mudanças via PR.
+          @$ORG/$TEAM, o serviço é de vocês:
+          - Acesso de escrita e CODEOWNERS para o time.
+          - Branch padrão \`develop\` (GitFlow); \`main\` e \`develop\` só recebem mudanças via PR.
           - A esteira já está ligada: abra um PR e acompanhe os gates.
           - Comece pelo contrato em \`api/openapi.yaml\`."
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label servico-criado
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
 
-      - name: Avisar falha na issue
+      - name: Avisar falha
         if: failure() && github.event_name == 'issues'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body "❌ Não foi possível criar o serviço. Detalhes: $RUN_URL"
+            --body "❌ Falha ao criar o serviço; a plataforma foi avisada. Detalhes: $RUN_URL"

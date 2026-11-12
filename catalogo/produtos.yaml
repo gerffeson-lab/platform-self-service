@@ -1,0 +1,17 @@
+# Catálogo de produtos da plataforma: fonte da verdade dos pedidos de serviço.
+#
+# Produto novo (onboarding) = PR neste arquivo, revisado pelo time plataforma (CODEOWNERS).
+# Depois do merge, rode `python3 scripts/render_form.py` no mesmo PR para atualizar o
+# formulário; o workflow "catalogo" falha se o formulário estiver desatualizado.
+
+regras:
+  # O nome do serviço deve começar com "<produto>-".
+  prefixo_produto: true
+  # Prefixos que só a plataforma usa.
+  prefixos_reservados: [platform-, gitops-, helm-]
+
+produtos:
+  cartoes:
+    descricao: Produto de exemplo da POC
+    system: cartoes
+    times: [pagamentos]

@@ -1,3 +1,4 @@
+# GERADO por scripts/render_form.py a partir de catalogo/produtos.yaml. Não edite à mão.
 name: Novo serviço
 description: Cria um serviço a partir do golden path (repositório, esteira e padrões prontos)
 title: "[novo-servico] "
@@ -6,30 +7,35 @@ body:
   - type: markdown
     attributes:
       value: |
-        Preencha os campos abaixo. Depois que a plataforma aprovar (label `aprovado`),
-        o repositório é criado automaticamente e o link aparece nesta issue.
+        O pedido é validado assim que você envia. Se estiver tudo certo, o repositório é criado
+        em poucos minutos e o link aparece nesta issue; se não, o bot explica o que corrigir.
+
+        - **Quem pode pedir:** maintainers (tech leads) do time responsável.
+        - **Produto que não aparece na lista:** o onboarding de produto é um PR em
+          `catalogo/produtos.yaml`, revisado pela plataforma.
   - type: input
     id: nome
     attributes:
       label: Nome do serviço
-      description: "Minúsculas, números e hífen; começa com letra (ex.: pagamentos-api)"
-      placeholder: pagamentos-api
+      description: "Comece pelo produto: <produto>-<nome>. Minúsculas, números e hífen (ex.: cartoes-autorizador)"
+      placeholder: cartoes-autorizador
     validations:
       required: true
-  - type: input
+  - type: dropdown
     id: produto
     attributes:
       label: Produto
-      description: "Produto ao qual o serviço pertence (ex.: cartoes)"
-      placeholder: cartoes
+      options:
+        - cartoes
     validations:
       required: true
-  - type: input
+  - type: dropdown
     id: time
     attributes:
-      label: Time responsável (slug do time no GitHub)
-      description: "O time recebe acesso de escrita e vira CODEOWNER (ex.: pagamentos)"
-      placeholder: pagamentos
+      label: Time responsável
+      description: Precisa ser um time do produto escolhido. Recebe acesso de escrita e vira CODEOWNER
+      options:
+        - pagamentos
     validations:
       required: true
   - type: input
@@ -45,3 +51,10 @@ body:
     attributes:
       label: Descrição
       description: O que o serviço faz, em uma ou duas frases
+  - type: checkboxes
+    id: confirmacao
+    attributes:
+      label: Confirmação
+      options:
+        - label: O serviço segue o golden path (Java/Spring, contrato OpenAPI primeiro, esteira da plataforma)
+          required: true

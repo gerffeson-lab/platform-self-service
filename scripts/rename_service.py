@@ -36,7 +36,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root")
     parser.add_argument("--name", required=True)
-    parser.add_argument("--product", required=True)
+    parser.add_argument("--system", required=True, help="system do catálogo (Backstage)")
     parser.add_argument("--org", required=True)
     parser.add_argument("--team", required=True)
     args = parser.parse_args()
@@ -62,7 +62,7 @@ def main() -> int:
         (TEMPLATE_NAME, args.name),
         (f"group:{TEMPLATE_TEAM}", f"group:{args.team}"),
         (f"@{args.org}/{TEMPLATE_TEAM}", f"@{args.org}/{args.team}"),
-        (TEMPLATE_SYSTEM, f"system: {args.product}"),
+        (TEMPLATE_SYSTEM, f"system: {args.system}"),
     ]
     changed = 0
     for path in walk_files(args.root):
