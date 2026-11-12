@@ -1,0 +1,47 @@
+name: Novo serviço
+description: Cria um serviço a partir do golden path (repositório, esteira e padrões prontos)
+title: "[novo-servico] "
+labels: [novo-servico]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Preencha os campos abaixo. Depois que a plataforma aprovar (label `aprovado`),
+        o repositório é criado automaticamente e o link aparece nesta issue.
+  - type: input
+    id: nome
+    attributes:
+      label: Nome do serviço
+      description: "Minúsculas, números e hífen; começa com letra (ex.: pagamentos-api)"
+      placeholder: pagamentos-api
+    validations:
+      required: true
+  - type: input
+    id: produto
+    attributes:
+      label: Produto
+      description: "Produto ao qual o serviço pertence (ex.: cartoes)"
+      placeholder: cartoes
+    validations:
+      required: true
+  - type: input
+    id: time
+    attributes:
+      label: Time responsável (slug do time no GitHub)
+      description: "O time recebe acesso de escrita e vira CODEOWNER (ex.: pagamentos)"
+      placeholder: pagamentos
+    validations:
+      required: true
+  - type: input
+    id: work-item
+    attributes:
+      label: Work item no Azure Boards
+      description: "Formato AB#<número>"
+      placeholder: "AB#123"
+    validations:
+      required: true
+  - type: textarea
+    id: descricao
+    attributes:
+      label: Descrição
+      description: O que o serviço faz, em uma ou duas frases

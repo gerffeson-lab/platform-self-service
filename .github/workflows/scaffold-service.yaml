@@ -1,0 +1,161 @@
+# Mecanismo de criação de serviços do golden path.
+# Interfaces: Issue Form (label "aprovado") hoje; workflow_dispatch para qualquer outra
+# (Azure Boards via relay, portal IDP etc.) sem mudar este workflow.
+name: scaffold-service
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      nome:
+        description: "Nome do serviço (ex.: pagamentos-api)"
+        required: true
+      produto:
+        description: "Produto (ex.: cartoes)"
+        required: true
+      time:
+        description: "Time responsável, slug do time no GitHub (ex.: pagamentos)"
+        required: true
+      work-item:
+        description: "Work item (AB#123)"
+        required: true
+      descricao:
+        description: "Descrição"
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: scaffold-${{ github.event.issue.number || github.run_id }}
+
+jobs:
+  scaffold:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.label.name == 'aprovado' && contains(github.event.issue.labels.*.name, 'novo-servico'))
+    runs-on: ubuntu-latest
+    # A chave da GitHub App fica num secret deste environment: só este job a enxerga.
+    environment: scaffold
+    env:
+      ORG: ${{ github.repository_owner }}
+      # public (POC em org Free) | internal (GitHub Enterprise) | private
+      VISIBILITY: ${{ vars.NEW_REPO_VISIBILITY || 'public' }}
+      TEMPLATE_REPO: ${{ github.repository_owner }}/platform-java-boilerplate
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ler e validar o pedido
+        id: req
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          IN_NOME: ${{ inputs.nome }}
+          IN_PRODUTO: ${{ inputs.produto }}
+          IN_TIME: ${{ inputs.time }}
+          IN_WORK_ITEM: ${{ inputs.work-item }}
+          IN_DESCRICAO: ${{ inputs.descricao }}
+        run: python3 -I scripts/parse_request.py >> "$GITHUB_OUTPUT"
+
+      # Token de curta duração da GitHub App da plataforma (sem PAT pessoal).
+      - name: Token da GitHub App
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.PLATFORM_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Verificar pré-condições
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          NAME: ${{ steps.req.outputs.nome }}
+          TEAM: ${{ steps.req.outputs.time }}
+        run: |
+          if ! gh api "orgs/$ORG/teams/$TEAM" --silent 2>/dev/null; then
+            echo "::error::O time '$TEAM' não existe na organização $ORG."
+            exit 1
+          fi
+          if gh repo view "$ORG/$NAME" >/dev/null 2>&1; then
+            echo "::error::O repositório $ORG/$NAME já existe."
+            exit 1
+          fi
+
+      - name: Criar repositório a partir do boilerplate
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          NAME: ${{ steps.req.outputs.nome }}
+          DESC: ${{ steps.req.outputs.descricao }}
+        run: |
+          case "$VISIBILITY" in
+            public|internal|private) ;;
+            *) echo "::error::NEW_REPO_VISIBILITY inválida: $VISIBILITY"; exit 1 ;;
+          esac
+          gh repo create "$ORG/$NAME" "--$VISIBILITY" --template "$TEMPLATE_REPO" --description "$DESC"
+          # a geração a partir do template é assíncrona
+          for _ in $(seq 1 30); do
+            gh api "repos/$ORG/$NAME/commits?per_page=1" >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+      - name: Personalizar (nome, pacote Java, time) e criar branches do GitFlow
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          NAME: ${{ steps.req.outputs.nome }}
+          PRODUCT: ${{ steps.req.outputs.produto }}
+          TEAM: ${{ steps.req.outputs.time }}
+          WORK_ITEM: ${{ steps.req.outputs.work_item }}
+        run: |
+          gh auth setup-git
+          git clone "https://github.com/$ORG/$NAME.git" work
+          python3 -I scripts/rename_service.py work --name "$NAME" --product "$PRODUCT" --org "$ORG" --team "$TEAM"
+          cd work
+          git config user.name "platform-bot"
+          git config user.email "platform-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: cria $NAME a partir do platform-java-boilerplate" -m "$WORK_ITEM"
+          git push origin HEAD:main
+          git push origin HEAD:refs/heads/develop
+          gh repo edit "$ORG/$NAME" --default-branch develop \
+            --add-topic golden-path --add-topic "produto-$PRODUCT" \
+            --delete-branch-on-merge
+
+      - name: Dar acesso de escrita ao time
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          NAME: ${{ steps.req.outputs.nome }}
+          TEAM: ${{ steps.req.outputs.time }}
+        run: gh api -X PUT "orgs/$ORG/teams/$TEAM/repos/$ORG/$NAME" -f permission=push --silent
+
+      - name: Aplicar regras de branch (main e develop só via PR)
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          NAME: ${{ steps.req.outputs.nome }}
+        run: gh api -X POST "repos/$ORG/$NAME/rulesets" --input rulesets/gitflow.json --silent
+
+      - name: Responder na issue
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ steps.req.outputs.nome }}
+          TEAM: ${{ steps.req.outputs.time }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "✅ Repositório criado: https://github.com/$ORG/$NAME
+
+          - Time responsável: @$ORG/$TEAM (escrita e CODEOWNERS).
+          - Branch padrão: \`develop\` (GitFlow). \`main\` e \`develop\` só recebem mudanças via PR.
+          - A esteira já está ligada: abra um PR e acompanhe os gates.
+          - Comece pelo contrato em \`api/openapi.yaml\`."
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
+
+      - name: Avisar falha na issue
+        if: failure() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "❌ Não foi possível criar o serviço. Detalhes: $RUN_URL"
