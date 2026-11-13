@@ -1,0 +1,20 @@
+# Catálogo da plataforma: fonte da verdade dos pedidos de self-service.
+#
+#   siglas -> produtos -> times
+#
+# A sigla é o código do sistema (conjunto de aplicações de uma área). O repositório de cada
+# aplicação se chama <sigla>-<produto>-<aplicação> (ex.: crt-credito-autorizador).
+#
+# Sigla ou produto novo = PR neste arquivo, revisado pela plataforma (CODEOWNERS). No mesmo
+# PR, rode `python3 scripts/cli.py formularios` para atualizar os formulários; o workflow
+# "catalogo" falha se eles estiverem desatualizados.
+#
+# Siglas e times desta POC são fictícios.
+
+siglas:
+  crt:
+    descricao: Cartões
+    produtos:
+      credito:
+        descricao: Cartão de crédito (emissão, autorização, faturas)
+        times: [pagamentos]
