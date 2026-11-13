@@ -1,0 +1,114 @@
+# Self-service da plataforma via IssueOps: validar -> aprovar -> executar.
+#
+# Genérico: a operação vem da label da issue (posta pelo Issue Form) ou do input do dispatch,
+# e toda a regra está em scripts/selfservice/operacoes/<operação>.py, com testes. Adicionar uma
+# operação nova não muda este arquivo.
+#
+# Entradas:
+# - Issue Form (abrir ou editar a issue): a entrada dos times.
+# - workflow_dispatch (operacao + dados em JSON): automações e, no futuro, um portal IDP.
+#
+# Aprovação: o job "aprovar" usa o environment "aprovacao-<operação>". Sem required reviewers,
+# o pedido válido segue direto; com reviewers, aguarda. Liga e desliga sem mudar código.
+name: selfservice
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  workflow_dispatch:
+    inputs:
+      operacao:
+        description: "Operação (ex.: novo-servico)"
+        required: true
+      dados:
+        description: 'Campos em JSON, com os ids do formulário (ex.: {"sigla-produto": "crt-credito", "aplicacao": "autorizador", "time": "pagamentos", "work-item": "AB#1"})'
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: selfservice-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  EVENT_NAME: ${{ github.event_name }}
+  ISSUE_NUMBER: ${{ github.event.issue.number }}
+
+jobs:
+  validar:
+    if: github.event_name == 'workflow_dispatch' || github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    environment: scaffold
+    outputs:
+      operacao: ${{ steps.op.outputs.operacao }}
+      valido: ${{ steps.validar.outputs.valido }}
+      pedido: ${{ steps.validar.outputs.pedido }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Identificar a operação
+        id: op
+        env:
+          ISSUE_STATE: ${{ github.event.issue.state }}
+          LABELS: ${{ toJSON(github.event.issue.labels.*.name) }}
+          INPUT_OPERACAO: ${{ inputs.operacao }}
+        run: python3 -I scripts/cli.py operacao
+
+      # Token de curta duração da GitHub App da plataforma (sem PAT pessoal)
+      - name: Token da GitHub App
+        id: app
+        if: steps.op.outputs.operacao != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.PLATFORM_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Validar o pedido
+        id: validar
+        if: steps.op.outputs.operacao != ''
+        env:
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          ISSUES_TOKEN: ${{ github.token }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          INPUT_DADOS: ${{ inputs.dados }}
+          REQUESTER: ${{ github.event.issue.user.login || github.actor }}
+          OPERACAO: ${{ steps.op.outputs.operacao }}
+        run: python3 -I scripts/cli.py validar "$OPERACAO"
+
+  aprovar:
+    needs: validar
+    if: needs.validar.outputs.valido == 'true'
+    runs-on: ubuntu-latest
+    environment: aprovacao-${{ needs.validar.outputs.operacao }}
+    steps:
+      - run: echo "Pedido liberado pelo environment de aprovação."
+
+  executar:
+    needs: [validar, aprovar]
+    runs-on: ubuntu-latest
+    environment: scaffold
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Token da GitHub App
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.PLATFORM_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Executar o pedido
+        env:
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          ISSUES_TOKEN: ${{ github.token }}
+          OPERACAO: ${{ needs.validar.outputs.operacao }}
+          PEDIDO: ${{ needs.validar.outputs.pedido }}
+          TEMPLATE_REPO: ${{ github.repository_owner }}/platform-java-boilerplate
+          # public (POC em org Free) | internal | private (GitHub Enterprise)
+          NEW_REPO_VISIBILITY: ${{ vars.NEW_REPO_VISIBILITY }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 -I scripts/cli.py executar "$OPERACAO"
