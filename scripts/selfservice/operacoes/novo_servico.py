@@ -1,9 +1,13 @@
 """Operação novo-servico: cria o repositório <sigla>-<produto>-<aplicação> a partir do
-boilerplate, com time dono, GitFlow, ruleset e custom properties."""
+template do golden path escolhido, com time dono, GitFlow, ruleset e custom properties.
+
+A personalização do código (pacote, nomes etc.) é do template: se ele tiver o script
+`.golden-path/personalizar`, ele roda aqui, sem token no ambiente."""
 
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -11,22 +15,23 @@ from pathlib import Path
 
 from .. import catalog
 from ..forms import Campo, Formulario
-from ..personalizar import personalizar
 
 ID = "novo-servico"
 APLICACAO_RE = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
 WORK_ITEM_RE = r"AB#[0-9]+"
 NOME_MAX = 60
 # custom properties da org gravadas no repositório (alvo de rulesets e políticas da org)
-PROPRIEDADES = ("sigla", "produto", "time")
+PROPRIEDADES = {"sigla": "sigla", "produto": "produto", "time": "time", "golden-path": "golden_path"}
+PERSONALIZAR = Path(".golden-path") / "personalizar"
 RULESET = Path(__file__).resolve().parents[3] / "rulesets" / "gitflow.json"
 
 
 def formulario(cat: dict) -> Formulario:
+    gps = catalog.golden_paths(cat)
     return Formulario(
         id=ID,
         nome="Novo serviço",
-        descricao="Cria um serviço a partir do golden path (repositório, esteira e padrões prontos)",
+        descricao="Cria um serviço a partir de um golden path (repositório, esteira e padrões prontos)",
         titulo="[novo-servico] ",
         intro="""
 O pedido é validado assim que você envia. Se estiver tudo certo, o repositório é criado em
@@ -34,24 +39,31 @@ poucos minutos e o link aparece nesta issue; se não, o bot explica o que corrig
 
 - **Quem pode pedir:** maintainers (tech leads) do time responsável.
 - **Nome do repositório:** `<sigla>-<produto>-<aplicação>`, montado a partir dos campos abaixo.
-- **Sigla ou produto que não aparece na lista:** é um PR em `catalogo/siglas.yaml`, revisado
-  pela plataforma.
+- **Sigla, produto ou time:** as listas mostram todo o catálogo; a validação confere se o produto
+  é da sigla e se o time é do produto. O que não aparece na lista é um PR em `catalogo/siglas.yaml`,
+  revisado pela plataforma.
 """,
         campos=(
-            Campo("sigla-produto", "Sigla e produto", "dropdown",
-                  descricao="Sistema (sigla) e produto do catálogo", opcoes=tuple(sorted(catalog.produtos(cat)))),
+            Campo("sigla", "Sigla", "dropdown", descricao="Sigla do sistema", opcoes=tuple(catalog.siglas(cat))),
+            Campo("produto", "Produto", "dropdown", descricao="Produto da sigla escolhida",
+                  opcoes=tuple(catalog.nomes_produtos(cat))),
             Campo("aplicacao", "Nome da aplicação", "input",
                   descricao="Minúsculas, números e hífen. O repositório será <sigla>-<produto>-<aplicação>",
                   placeholder="autorizador"),
             Campo("time", "Time responsável", "dropdown",
                   descricao="Precisa ser um time do produto. Recebe acesso de escrita e vira CODEOWNER",
                   opcoes=tuple(catalog.all_teams(cat))),
+            Campo("golden-path", "Golden path", "dropdown",
+                  descricao="; ".join(f"{k}: {v['nome']} ({v.get('descricao', '')})".replace(" ()", "")
+                                      for k, v in sorted(gps.items())),
+                  opcoes=tuple(sorted(gps))),
             Campo("work-item", "Work item no Azure Boards", "input",
                   descricao="Formato AB#<número>", placeholder="AB#123"),
             Campo("descricao", "Descrição", "textarea",
                   descricao="O que o serviço faz, em uma ou duas frases", obrigatorio=False),
             Campo("confirmacao", "Confirmação", "checkboxes", opcoes=(
-                "O serviço segue o golden path (Java/Spring, contrato OpenAPI primeiro, esteira da plataforma)",)),
+                "Li a documentação do golden path escolhido e o serviço vai seguir os padrões dele "
+                "(contrato, esteira e padrões da plataforma)",)),
         ),
     )
 
@@ -59,18 +71,23 @@ poucos minutos e o link aparece nesta issue; se não, o bot explica o que corrig
 def validar(campos: dict, cat: dict) -> tuple[dict, list[str]]:
     """Regras que não dependem do GitHub. Devolve (pedido só com valores seguros, erros)."""
     produtos = catalog.produtos(cat)
-    chave = campos.get("sigla-produto", "")
-    aplicacao = campos.get("aplicacao", "")
-    time_ = campos.get("time", "")
-    work_item = campos.get("work-item", "")
+    sigla, nome_produto = campos.get("sigla", ""), campos.get("produto", "")
+    aplicacao, time_ = campos.get("aplicacao", ""), campos.get("time", "")
+    gp_id, work_item = campos.get("golden-path", ""), campos.get("work-item", "")
     pedido, erros = {}, []
 
+    chave = f"{sigla}-{nome_produto}"
     produto = produtos.get(chave)
-    if not produto:
-        erros.append(f"`{chave or '(vazio)'}` não está no catálogo. Sigla ou produto novo é um PR em "
+    if sigla not in catalog.siglas(cat):
+        erros.append(f"A sigla `{sigla or '(vazio)'}` não está no catálogo. Sigla nova é um PR em "
+                     "`catalogo/siglas.yaml`.")
+    elif not produto:
+        da_sigla = sorted(p["produto"] for p in produtos.values() if p["sigla"] == sigla)
+        erros.append(f"O produto `{nome_produto or '(vazio)'}` não pertence à sigla `{sigla}` "
+                     f"(produtos: {', '.join(f'`{p}`' for p in da_sigla)}). Produto novo é um PR em "
                      "`catalogo/siglas.yaml`.")
     else:
-        pedido.update(sigla=produto["sigla"], produto=produto["produto"])
+        pedido.update(sigla=sigla, produto=nome_produto)
         if time_ not in produto["times"]:
             erros.append(f"O time `{time_ or '(vazio)'}` não pertence a `{chave}` "
                          f"(times: {', '.join(f'`{t}`' for t in produto['times'])}).")
@@ -82,13 +99,20 @@ def validar(campos: dict, cat: dict) -> tuple[dict, list[str]]:
                      "com letra e sem hífen no fim ou repetido.")
     elif produto:
         nome = f"{chave}-{aplicacao}"
-        if aplicacao.startswith(f"{produto['sigla']}-") or aplicacao.startswith(f"{produto['produto']}-"):
+        if aplicacao.startswith(f"{sigla}-") or aplicacao.startswith(f"{nome_produto}-"):
             erros.append(f"Não repita a sigla ou o produto no nome da aplicação: o repositório já se chama "
                          f"`{chave}-<aplicação>`.")
         elif len(nome) > NOME_MAX:
             erros.append(f"`{nome}` passa de {NOME_MAX} caracteres; encurte o nome da aplicação.")
         else:
             pedido.update(aplicacao=aplicacao, nome=nome)
+
+    gp = catalog.golden_paths(cat).get(gp_id)
+    if gp:
+        pedido.update(golden_path=gp_id, template=gp["template"])
+    else:
+        erros.append(f"Golden path `{gp_id or '(vazio)'}` não está no catálogo "
+                     f"(opções: {', '.join(f'`{g}`' for g in sorted(catalog.golden_paths(cat)))}).")
 
     if re.fullmatch(WORK_ITEM_RE, work_item):
         pedido["work_item"] = work_item
@@ -102,6 +126,9 @@ def validar(campos: dict, cat: dict) -> tuple[dict, list[str]]:
 def checar(pedido: dict, gh) -> list[str]:
     """Regras que dependem do GitHub (com o token da App)."""
     erros = []
+    if pedido.get("template") and not gh.exists(f"repos/{gh.org}/{pedido['template']}"):
+        erros.append(f"O template `{pedido['template']}` do golden path `{pedido['golden_path']}` não existe "
+                     "na organização (avise a plataforma).")
     if pedido.get("time") and not gh.exists(f"orgs/{gh.org}/teams/{pedido['time']}"):
         erros.append(f"O time `{pedido['time']}` não existe na organização.")
     if pedido.get("nome") and gh.exists(f"repos/{gh.org}/{pedido['nome']}"):
@@ -121,21 +148,21 @@ def autorizar(pedido: dict, gh, solicitante: str) -> list[str]:
 
 
 def resumo(pedido: dict) -> str:
-    return f"Criando `{pedido['nome']}` para o time `{pedido['time']}`."
+    return f"Criando `{pedido['nome']}` ({pedido['golden_path']}) para o time `{pedido['time']}`."
 
 
-def executar(pedido: dict, gh, cfg: dict, publicar=None) -> str:
+def executar(pedido: dict, gh, cfg: dict, publicar=None, cat: dict | None = None) -> str:
     """Idempotente: o "Re-run failed jobs" retoma de onde parou."""
     org, nome = gh.org, pedido["nome"]
     repo = f"{org}/{nome}"
 
     if not gh.exists(f"repos/{repo}"):
-        gh.gh("repo", "create", repo, f"--{cfg['visibilidade']}", "--template", cfg["template"],
+        gh.gh("repo", "create", repo, f"--{cfg['visibilidade']}", "--template", f"{org}/{pedido['template']}",
               "--description", pedido["descricao"])
         _aguardar(lambda: gh.exists(f"repos/{repo}/commits?per_page=1"))
 
     gh.api(f"repos/{repo}/properties/values", "PATCH",
-           {"properties": [{"property_name": p, "value": pedido[p]} for p in PROPRIEDADES]})
+           {"properties": [{"property_name": p, "value": pedido[k]} for p, k in PROPRIEDADES.items()]})
 
     if not gh.exists(f"repos/{repo}/branches/develop"):
         (publicar or _publicar)(gh, repo, pedido)
@@ -149,12 +176,14 @@ def executar(pedido: dict, gh, cfg: dict, publicar=None) -> str:
     if ruleset["name"] not in {r["name"] for r in gh.api(f"repos/{repo}/rulesets") or []}:
         gh.api(f"repos/{repo}/rulesets", "POST", ruleset)
 
+    gp = catalog.golden_paths(cat or {}).get(pedido["golden_path"], {})
+    primeiro_passo = gp.get("primeiro_passo") or "Comece pelo README do repositório."
     return (f"🚀 Repositório criado: {cfg['server_url']}/{repo}\n\n"
-            f"@{org}/{pedido['time']}, o serviço é de vocês:\n"
+            f"@{org}/{pedido['time']}, o serviço é de vocês ({gp.get('nome', pedido['golden_path'])}):\n"
             "- Acesso de escrita e CODEOWNERS para o time.\n"
             "- Branch padrão `develop` (GitFlow); `main` e `develop` só recebem mudanças via PR.\n"
             "- A esteira já está ligada: abra um PR e acompanhe os gates.\n"
-            "- Comece pelo contrato em `api/openapi.yaml`.")
+            f"- {primeiro_passo}")
 
 
 def _aguardar(pronto, tentativas: int = 30, intervalo: float = 2) -> None:
@@ -167,13 +196,13 @@ def _aguardar(pronto, tentativas: int = 30, intervalo: float = 2) -> None:
 
 
 def _publicar(gh, repo: str, pedido: dict) -> None:
-    """Clona, personaliza e publica main e develop (commit com o AB# do pedido)."""
+    """Clona, personaliza (script do template) e publica main e develop (commit com o AB#)."""
     env = {**os.environ, "GH_TOKEN": gh.token}
     with tempfile.TemporaryDirectory() as tmp:
         work = os.path.join(tmp, "repo")
         gh.gh("auth", "setup-git")
         gh.gh("repo", "clone", repo, work)
-        personalizar(work, pedido["nome"], pedido["sigla"], gh.org, pedido["time"])
+        personalizar(work, pedido, gh.org)
 
         def git(*args):
             subprocess.run(["git", "-C", work, "-c", "user.name=platform-bot",
@@ -181,7 +210,28 @@ def _publicar(gh, repo: str, pedido: dict) -> None:
                            check=True, env=env)
 
         git("add", "-A")
-        git("commit", "-m", f"chore: cria {pedido['nome']} a partir do platform-java-boilerplate",
+        git("commit", "--allow-empty", "-m", f"chore: cria {pedido['nome']} a partir do {pedido['template']}",
             "-m", pedido["work_item"])
         git("push", "origin", "HEAD:main")
         git("push", "origin", "HEAD:refs/heads/develop")
+
+
+def personalizar(work: str, pedido: dict, org: str, run=subprocess.run) -> None:
+    """Roda o `.golden-path/personalizar` do template, se houver, e apaga `.golden-path/`.
+
+    O script é do template (mantido por quem mantém o golden path) e roda sem nenhum token
+    ou credencial no ambiente: só PATH, HOME e o pedido em variáveis GP_*."""
+    script = Path(work) / PERSONALIZAR
+    if script.is_file():
+        if not os.access(script, os.X_OK):
+            raise RuntimeError(f"{PERSONALIZAR} do template {pedido['template']} não é executável.")
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/tmp"),
+               "GP_ORG": org, "GP_NOME": pedido["nome"], "GP_SIGLA": pedido["sigla"],
+               "GP_PRODUTO": pedido["produto"], "GP_APLICACAO": pedido["aplicacao"],
+               "GP_TIME": pedido["time"], "GP_DESCRICAO": pedido.get("descricao", "")}
+        proc = run([str(script.resolve())], cwd=work, env=env, capture_output=True, text=True, timeout=300)
+        print(proc.stdout, end="")
+        if proc.returncode != 0:
+            raise RuntimeError(f"{PERSONALIZAR} do template {pedido['template']} falhou: "
+                               f"{proc.stderr.strip()[-500:]}")
+    shutil.rmtree(Path(work) / PERSONALIZAR.parent, ignore_errors=True)

@@ -12,7 +12,9 @@ class FormsTest(unittest.TestCase):
     def test_render_e_parse_usam_os_mesmos_rotulos(self):
         form = OPERACOES["novo-servico"].formulario(CAT)
         yaml = forms.render(form)
-        self.assertIn('- "crt-credito"', yaml)
+        self.assertIn('- "crt"', yaml)
+        self.assertIn('- "consignado"', yaml)
+        self.assertIn('- "java-spring"', yaml)
         corpo = "\n\n".join(f"### {c.label}\n\nvalor-{c.id}" for c in form.campos)
         campos = forms.parse(corpo, form)
         self.assertEqual(campos["aplicacao"], "valor-aplicacao")

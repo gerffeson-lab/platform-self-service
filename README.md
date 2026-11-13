@@ -8,18 +8,22 @@ executa na hora, e todo o acompanhamento fica na issue. Sem fila e sem portal.
 | Pedido | Quem pede | Como | Aprovação |
 |---|---|---|---|
 | **Sigla ou produto novo** | Tech lead ou PO | PR em [`catalogo/siglas.yaml`](catalogo/siglas.yaml) | **Sim**: revisão da plataforma (CODEOWNERS) |
+| **Golden path novo** (ex.: Go) | Time dono do template | Template na org + PR em [`catalogo/golden-paths.yaml`](catalogo/golden-paths.yaml) | **Sim**: revisão da plataforma (CODEOWNERS) |
 | **Serviço novo** numa sigla/produto do catálogo | Maintainer (tech lead) do time dono | Issue **Novo serviço** | **Não**: validou, criou |
 
-A governança fica no que é estrutural e raro (sigla, produto, times). O dia a dia não depende
+A governança fica no que é estrutural e raro (sigla, produto, times, golden paths). O dia a dia não depende
 de alguém aprovar no meio de centenas de notificações.
 
 ## Pedir um serviço
 
-1. **Issues → New issue → Novo serviço**: sigla e produto, nome da aplicação, time e o `AB#`
-   do Azure Boards.
+1. **Issues → New issue → Novo serviço**: sigla, produto, nome da aplicação, time, golden path
+   e o `AB#` do Azure Boards. Sigla, produto, time e golden path são listas do catálogo; só o
+   nome da aplicação é livre.
 2. O repositório se chama **`<sigla>-<produto>-<aplicação>`** (ex.: `crt-credito-autorizador`).
 3. A validação roda na hora:
-   - sigla e produto no catálogo, e o time pertence ao produto;
+   - sigla no catálogo, produto da sigla e time do produto (o Issue Form não filtra uma lista
+     pela outra, então a validação confere a combinação e diz quais são as opções válidas);
+   - golden path no catálogo, com o template existente na org;
    - nome da aplicação no padrão, sem repetir a sigla ou o produto, e repositório inexistente;
    - **quem pediu é maintainer do time** (senão o pedido é fechado como não autorizado);
    - `AB#` no formato do Azure Boards.
@@ -32,12 +36,13 @@ JSON). É a entrada para automações e para um portal IDP no futuro.
 
 ## O que o novo serviço recebe
 
-1. Repositório a partir do `platform-java-boilerplate`, personalizado (artifactId, pacote
-   Java, classe principal, time e sigla no `catalog-info.yaml`).
+1. Repositório criado a partir do **template do golden path escolhido** (não é fork: histórico
+   limpo e a visibilidade da org) e personalizado pelo script do próprio template (veja
+   [Golden path novo](#golden-path-novo)).
 2. Commit inicial com o `AB#` (vínculo com o Azure Boards), branches `main` e `develop`, e
    `develop` como padrão.
-3. **Custom properties** `sigla`, `produto` e `time`, que servem de alvo para rulesets e
-   políticas da organização.
+3. **Custom properties** `sigla`, `produto`, `time` e `golden-path`, que servem de alvo para
+   rulesets e políticas da organização.
 4. Acesso de escrita para o time, que também é o CODEOWNER.
 5. Ruleset [`rulesets/gitflow.json`](rulesets/gitflow.json): `main` e `develop` só via PR, sem
    force push e sem deleção.
@@ -81,20 +86,48 @@ required reviewers.
 4. A plataforma revisa e faz o merge. Na fase 2, o mesmo catálogo alimenta o onboarding no
    GitOps (namespaces e AppProject do Argo CD por sigla/produto).
 
+## Golden path novo
+
+O self-service não sabe nada de linguagem. Cada golden path é um **repositório template** da
+org, mantido por quem é dono dele, e uma entrada em
+[`catalogo/golden-paths.yaml`](catalogo/golden-paths.yaml):
+
+```yaml
+golden_paths:
+  go:
+    nome: Go
+    descricao: API REST em Go com contrato OpenAPI primeiro
+    template: platform-go-boilerplate
+    primeiro_passo: Comece pelo contrato em `api/openapi.yaml`.
+```
+
+Contrato com o template:
+
+- O repositório é marcado como **template** na org.
+- Se o template tiver o script executável **`.golden-path/personalizar`**, o self-service roda
+  esse script na raiz do repositório gerado, **sem nenhum token no ambiente**, com o pedido em
+  `GP_ORG`, `GP_NOME`, `GP_SIGLA`, `GP_PRODUTO`, `GP_APLICACAO`, `GP_TIME` e `GP_DESCRICAO`.
+  Depois apaga `.golden-path/` e publica. Sem o script, o repositório é publicado como veio.
+- O template prova no próprio CI que continua personalizável (veja o `golden-path.yaml` do
+  `platform-java-boilerplate`).
+
+No PR do catálogo, `python3 scripts/cli.py formularios` adiciona a opção ao formulário.
+
 ## Configuração da organização
 
 **Times:** `plataforma` (dona dos repos da plataforma) e os times de produto. Quem pede precisa
 ser **maintainer** do time.
 
-**Custom properties** (org → Settings → Custom properties): `sigla`, `produto` e `time`, do
-tipo texto. Em linha de comando, com um owner da org:
+**Custom properties** (org → Settings → Custom properties): `sigla`, `produto`, `time` e
+`golden-path`, do tipo texto. Em linha de comando, com um owner da org:
 
 ```bash
 gh api -X PATCH orgs/<org>/properties/schema --input - <<'EOF'
 {"properties": [
   {"property_name": "sigla",   "value_type": "string", "description": "Sigla do sistema"},
   {"property_name": "produto", "value_type": "string", "description": "Produto da sigla"},
-  {"property_name": "time",    "value_type": "string", "description": "Time dono"}
+  {"property_name": "time",    "value_type": "string", "description": "Time dono"},
+  {"property_name": "golden-path", "value_type": "string", "description": "Golden path de origem"}
 ]}
 EOF
 ```

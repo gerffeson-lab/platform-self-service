@@ -1,6 +1,6 @@
 # GERADO por scripts/cli.py formularios a partir do catálogo. Não edite à mão.
 name: "Novo serviço"
-description: "Cria um serviço a partir do golden path (repositório, esteira e padrões prontos)"
+description: "Cria um serviço a partir de um golden path (repositório, esteira e padrões prontos)"
 title: "[novo-servico] "
 labels: ["novo-servico"]
 body:
@@ -12,15 +12,25 @@ body:
 
         - **Quem pode pedir:** maintainers (tech leads) do time responsável.
         - **Nome do repositório:** `<sigla>-<produto>-<aplicação>`, montado a partir dos campos abaixo.
-        - **Sigla ou produto que não aparece na lista:** é um PR em `catalogo/siglas.yaml`, revisado
-          pela plataforma.
+        - **Sigla, produto ou time:** as listas mostram todo o catálogo; a validação confere se o produto
+          é da sigla e se o time é do produto. O que não aparece na lista é um PR em `catalogo/siglas.yaml`,
+          revisado pela plataforma.
   - type: dropdown
-    id: sigla-produto
+    id: sigla
     attributes:
-      label: "Sigla e produto"
-      description: "Sistema (sigla) e produto do catálogo"
+      label: "Sigla"
+      description: "Sigla do sistema"
       options:
-        - "crt-credito"
+        - "crt"
+    validations:
+      required: true
+  - type: dropdown
+    id: produto
+    attributes:
+      label: "Produto"
+      description: "Produto da sigla escolhida"
+      options:
+        - "credito"
     validations:
       required: true
   - type: input
@@ -38,6 +48,15 @@ body:
       description: "Precisa ser um time do produto. Recebe acesso de escrita e vira CODEOWNER"
       options:
         - "pagamentos"
+    validations:
+      required: true
+  - type: dropdown
+    id: golden-path
+    attributes:
+      label: "Golden path"
+      description: "java-spring: Java / Spring Boot (API REST com contrato OpenAPI primeiro, Maven e esteira ci-java)"
+      options:
+        - "java-spring"
     validations:
       required: true
   - type: input
@@ -58,5 +77,5 @@ body:
     attributes:
       label: "Confirmação"
       options:
-        - label: "O serviço segue o golden path (Java/Spring, contrato OpenAPI primeiro, esteira da plataforma)"
+        - label: "Li a documentação do golden path escolhido e o serviço vai seguir os padrões dele (contrato, esteira e padrões da plataforma)"
           required: true

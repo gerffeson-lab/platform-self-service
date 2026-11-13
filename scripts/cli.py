@@ -10,7 +10,7 @@ Contrato com o workflow, por variáveis de ambiente:
     INPUT_OPERACAO, INPUT_DADOS (JSON)        no workflow_dispatch
     APP_TOKEN    token da GitHub App da plataforma (org: times, repositórios)
     ISSUES_TOKEN GITHUB_TOKEN do workflow (comentar e rotular as issues)
-    PEDIDO (JSON), TEMPLATE_REPO, NEW_REPO_VISIBILITY, RUN_URL   no executar"""
+    PEDIDO (JSON), NEW_REPO_VISIBILITY, RUN_URL   no executar"""
 
 import json
 import os
@@ -23,7 +23,7 @@ from selfservice.github import GitHub  # noqa: E402
 from selfservice.operacoes import OPERACOES  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-CATALOGO = ROOT / "catalogo" / "siglas.yaml"
+CATALOGO = ROOT / "catalogo"
 TEMPLATES = ROOT / ".github" / "ISSUE_TEMPLATE"
 LABEL_INVALIDO, LABEL_CONCLUIDO = "pedido-invalido", "concluido"
 ENV = os.environ
@@ -76,7 +76,7 @@ def cmd_operacao() -> int:
 
 
 def cmd_validar(op: str) -> int:
-    mod, cat = OPERACOES[op], catalog.load(str(CATALOGO))
+    mod, cat = OPERACOES[op], catalog.carregar(CATALOGO)
     if is_issue():
         campos = forms.parse(ENV.get("ISSUE_BODY", ""), mod.formulario(cat))
     else:
@@ -121,11 +121,10 @@ def cmd_executar(op: str) -> int:
     if visibilidade not in ("public", "internal", "private"):
         print(f"::error::NEW_REPO_VISIBILITY inválida: {visibilidade}")
         return 1
-    cfg = {"visibilidade": visibilidade, "template": ENV["TEMPLATE_REPO"],
-           "server_url": ENV.get("GITHUB_SERVER_URL", "https://github.com")}
+    cfg = {"visibilidade": visibilidade, "server_url": ENV.get("GITHUB_SERVER_URL", "https://github.com")}
     pedido = json.loads(ENV["PEDIDO"])
     try:
-        mensagem = mod.executar(pedido, app(), cfg)
+        mensagem = mod.executar(pedido, app(), cfg, cat=catalog.carregar(CATALOGO))
     except Exception as exc:
         print(f"::error::{exc}")
         if is_issue():
@@ -142,11 +141,15 @@ def cmd_executar(op: str) -> int:
 
 
 def cmd_formularios(check: bool) -> int:
-    cat = catalog.load(str(CATALOGO))
-    erros = catalog.check(cat)
+    try:
+        cat = catalog.carregar(CATALOGO)
+    except ValueError as exc:
+        cat, erros = {}, [str(exc)]
+    else:
+        erros = catalog.check(cat)
     if erros:
         for e in erros:
-            print(f"::error file=catalogo/siglas.yaml::{e}", file=sys.stderr)
+            print(f"::error file=catalogo::{e}", file=sys.stderr)
         return 1
     desatualizados = []
     for op, mod in OPERACOES.items():

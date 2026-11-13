@@ -21,7 +21,7 @@ on:
         description: "Operação (ex.: novo-servico)"
         required: true
       dados:
-        description: 'Campos em JSON, com os ids do formulário (ex.: {"sigla-produto": "crt-credito", "aplicacao": "autorizador", "time": "pagamentos", "work-item": "AB#1"})'
+        description: 'Campos em JSON, com os ids do formulário (ex.: {"sigla": "crt", "produto": "credito", "aplicacao": "autorizador", "time": "pagamentos", "golden-path": "java-spring", "work-item": "AB#1"})'
         required: true
 
 permissions:
@@ -107,7 +107,6 @@ jobs:
           ISSUES_TOKEN: ${{ github.token }}
           OPERACAO: ${{ needs.validar.outputs.operacao }}
           PEDIDO: ${{ needs.validar.outputs.pedido }}
-          TEMPLATE_REPO: ${{ github.repository_owner }}/platform-java-boilerplate
           # public (POC em org Free) | internal | private (GitHub Enterprise)
           NEW_REPO_VISIBILITY: ${{ vars.NEW_REPO_VISIBILITY }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
