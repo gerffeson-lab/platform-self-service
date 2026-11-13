@@ -1,0 +1,16 @@
+# Golden paths oferecidos no pedido de serviço novo.
+#
+# Cada golden path aponta para um repositório template da org. Se o template tiver o script
+# executável `.golden-path/personalizar`, o self-service roda esse script na raiz do repositório
+# gerado (sem token, com o pedido em variáveis GP_*) e depois apaga `.golden-path/`.
+# A personalização é de quem mantém o template; o self-service não sabe nada de linguagem.
+#
+# Golden path novo = template na org + PR neste arquivo, revisado pela plataforma. No mesmo
+# PR, rode `python3 scripts/cli.py formularios` para atualizar os formulários.
+
+golden_paths:
+  java-spring:
+    nome: Java / Spring Boot
+    descricao: API REST com contrato OpenAPI primeiro, Maven e esteira ci-java
+    template: platform-java-boilerplate
+    primeiro_passo: Comece pelo contrato em `api/openapi.yaml`.
