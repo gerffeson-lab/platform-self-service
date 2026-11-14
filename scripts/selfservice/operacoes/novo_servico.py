@@ -33,13 +33,14 @@ def formulario(cat: dict) -> Formulario:
         id=ID,
         nome="Novo serviço",
         descricao="Cria um serviço a partir de um golden path (repositório, esteira e padrões prontos)",
-        titulo="[novo-servico] ",
+        titulo=f"[{ID}]",
         intro="""
 O pedido é validado assim que você envia. Se estiver tudo certo, o repositório é criado em
 poucos minutos e o link aparece nesta issue; se não, o bot explica o que corrigir.
 
 - **Quem pode pedir:** maintainers (tech leads) do time responsável.
 - **Nome do repositório:** `<sigla>-<produto>-<aplicação>`, montado a partir dos campos abaixo.
+- **Título:** não precisa mexer; o bot completa com o nome do repositório.
 - **Sigla, produto ou time:** as listas mostram todo o catálogo; a validação confere se o produto
   é da sigla e se o time é do produto. O que não aparece na lista é um PR em `catalogo/siglas.yaml`,
   revisado pela plataforma.
@@ -157,6 +158,10 @@ def autorizar(pedido: dict, gh, solicitante: str) -> list[str]:
         return []
     return [f"@{solicitante} não é maintainer do time `{pedido['time']}`. Só os maintainers (tech leads) "
             "do time podem pedir serviços para ele."]
+
+
+def titulo(pedido: dict) -> str | None:
+    return f"[{ID}] {pedido['nome']}" if pedido.get("nome") else None
 
 
 def resumo(pedido: dict) -> str:
