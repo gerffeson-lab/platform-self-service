@@ -37,10 +37,10 @@ JSON). É a entrada para automações e para um portal IDP no futuro.
 ## O que o novo serviço recebe
 
 1. Repositório criado a partir do **template do golden path escolhido** (não é fork: histórico
-   limpo e a visibilidade da org) e personalizado pelo script do próprio template (veja
-   [Golden path novo](#golden-path-novo)).
-2. Commit inicial com o `AB#` (vínculo com o Azure Boards), branches `main` e `develop`, e
-   `develop` como padrão.
+   limpo e a visibilidade da org). O código não é reescrito: o template não tem identidade de
+   serviço (veja [Golden path novo](#golden-path-novo)).
+2. `CODEOWNERS` com o time, num commit com o `AB#` (vínculo com o Azure Boards); branches
+   `main` e `develop`, com `develop` como padrão. Tudo pela API, sem clone.
 3. **Custom properties** `sigla`, `produto`, `time` e `golden-path`, que servem de alvo para
    rulesets e políticas da organização.
 4. Acesso de escrita para o time, que também é o CODEOWNER.
@@ -101,15 +101,15 @@ golden_paths:
     primeiro_passo: Comece pelo contrato em `api/openapi.yaml`.
 ```
 
-Contrato com o template:
+Regras para o template:
 
 - O repositório é marcado como **template** na org.
-- Se o template tiver o script executável **`.golden-path/personalizar`**, o self-service roda
-  esse script na raiz do repositório gerado, **sem nenhum token no ambiente**, com o pedido em
-  `GP_ORG`, `GP_NOME`, `GP_SIGLA`, `GP_PRODUTO`, `GP_APLICACAO`, `GP_TIME` e `GP_DESCRICAO`.
-  Depois apaga `.golden-path/` e publica. Sem o script, o repositório é publicado como veio.
-- O template prova no próprio CI que continua personalizável (veja o `golden-path.yaml` do
-  `platform-java-boilerplate`).
+- **Não carrega identidade de serviço** (nome, pacote, time): o serviço gerado é uma cópia
+  exata, sem script de personalização. A identidade vem da plataforma em dois pontos:
+  - **dono**: o self-service grava o `CODEOWNERS` com o time;
+  - **runtime** (nome em logs, traces e Kubernetes): o deploy injeta a partir do nome do
+    repositório (ex.: `SPRING_APPLICATION_NAME`).
+- Sigla, produto, time e golden path ficam nas custom properties do repositório.
 
 No PR do catálogo, `python3 scripts/cli.py formularios` adiciona a opção ao formulário.
 
