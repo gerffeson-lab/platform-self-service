@@ -18,6 +18,9 @@ from ..github import GitHubError
 ID = "novo-servico"
 APLICACAO_RE = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
 WORK_ITEM_RE = r"AB#([0-9]+)"
+# Com o app do Azure Boards conectado, o GitHub transforma "AB#1" em link na issue:
+# "[AB#1](https://dev.azure.com/...)". Aceita as duas formas e guarda só o "AB#1".
+WORK_ITEM_CAMPO_RE = r"\[?(AB#[0-9]+)\]?(?:\(https://[^)\s]+\))?"
 # work item encerrado não serve de origem para um serviço novo
 ESTADOS_ENCERRADOS = {"Closed", "Done", "Removed"}
 NOME_MAX = 60
@@ -116,8 +119,8 @@ def validar(campos: dict, cat: dict) -> tuple[dict, list[str]]:
         erros.append(f"Golden path `{gp_id or '(vazio)'}` não está no catálogo "
                      f"(opções: {', '.join(f'`{g}`' for g in sorted(catalog.golden_paths(cat)))}).")
 
-    if re.fullmatch(WORK_ITEM_RE, work_item):
-        pedido["work_item"] = work_item
+    if m := re.fullmatch(WORK_ITEM_CAMPO_RE, work_item):
+        pedido["work_item"] = m.group(1)
     else:
         erros.append("Work item inválido: use o formato `AB#<número>` do Azure Boards.")
 
