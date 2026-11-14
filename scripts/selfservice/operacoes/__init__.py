@@ -4,7 +4,7 @@ Para adicionar uma operação, crie um módulo aqui com:
     ID                                  id da operação (também é a label da issue)
     formulario(cat) -> Formulario       campos do Issue Form (gerado a partir do catálogo)
     validar(campos, cat) -> (pedido, erros)   regras sem rede; pedido só com valores seguros
-    checar(pedido, gh) -> erros         regras que consultam o GitHub
+    checar(pedido, gh, boards) -> erros regras que consultam o GitHub e o Azure Boards (boards pode ser None)
     autorizar(pedido, gh, solicitante) -> erros   quem pode pedir
     resumo(pedido) -> str               linha para o comentário de pedido válido
     executar(pedido, gh, cfg, cat=...) -> str   executa (idempotente) e devolve a mensagem final

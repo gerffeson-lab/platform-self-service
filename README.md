@@ -26,7 +26,8 @@ de alguém aprovar no meio de centenas de notificações.
    - golden path no catálogo, com o template existente na org;
    - nome da aplicação no padrão, sem repetir a sigla ou o produto, e repositório inexistente;
    - **quem pediu é maintainer do time** (senão o pedido é fechado como não autorizado);
-   - `AB#` no formato do Azure Boards.
+   - `AB#` de um work item que **existe e está aberto** no Azure Boards (uma consulta só: o ID
+     é único na organização do Azure DevOps, não precisa saber o projeto).
 4. Com erro, o bot comenta o que corrigir e marca `pedido-invalido`; **editar a issue**
    revalida. Válido, o repositório é criado, o **time é mencionado** e a issue é fechada com
    `concluido`.
@@ -157,6 +158,10 @@ EOF
 - Secret `PLATFORM_APP_PRIVATE_KEY` no **environment `scaffold`**: o conteúdo do `.pem`. Não
   use um secret de org visível para todos os repos, porque qualquer workflow da org
   conseguiria emitir um token de administrador.
+- Azure Boards: variável `AZDO_ORG` (nome da organização no Azure DevOps) e secret
+  `AZDO_TOKEN` no environment `scaffold`, com permissão só de leitura de work items. Sem os
+  dois, o `AB#` só tem o formato conferido. No banco, um service principal com federação OIDC
+  no lugar do token.
 - Opcional: variável `NEW_REPO_VISIBILITY` (`public`, `internal` ou `private`). O padrão é
   `public`.
 

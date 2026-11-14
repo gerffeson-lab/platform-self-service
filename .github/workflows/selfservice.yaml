@@ -72,6 +72,10 @@ jobs:
         env:
           APP_TOKEN: ${{ steps.app.outputs.token }}
           ISSUES_TOKEN: ${{ github.token }}
+          # Azure Boards: confere se o AB# existe e está aberto (token só de leitura de work items)
+          AZDO_ORG: ${{ vars.AZDO_ORG }}
+          AZDO_TOKEN: ${{ secrets.AZDO_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           INPUT_DADOS: ${{ inputs.dados }}
           REQUESTER: ${{ github.event.issue.user.login || github.actor }}
