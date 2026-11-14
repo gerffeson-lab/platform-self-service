@@ -7,6 +7,7 @@ Para adicionar uma operação, crie um módulo aqui com:
     checar(pedido, gh, boards) -> erros regras que consultam o GitHub e o Azure Boards (boards pode ser None)
     autorizar(pedido, gh, solicitante) -> erros   quem pode pedir
     resumo(pedido) -> str               linha para o comentário de pedido válido
+    titulo(pedido) -> str | None        opcional: título da issue, completado pelo bot
     executar(pedido, gh, cfg, cat=...) -> str   executa (idempotente) e devolve a mensagem final
 e registre em OPERACOES. Depois: `python3 scripts/cli.py formularios` e testes em tests/."""
 

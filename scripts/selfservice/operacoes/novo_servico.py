@@ -18,6 +18,9 @@ from ..github import GitHubError
 ID = "novo-servico"
 APLICACAO_RE = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
 WORK_ITEM_RE = r"AB#([0-9]+)"
+# Com o app do Azure Boards conectado, o GitHub transforma "AB#1" em link na issue:
+# "[AB#1](https://dev.azure.com/...)". Aceita as duas formas e guarda só o "AB#1".
+WORK_ITEM_CAMPO_RE = r"\[?(AB#[0-9]+)\]?(?:\(https://[^)\s]+\))?"
 # work item encerrado não serve de origem para um serviço novo
 ESTADOS_ENCERRADOS = {"Closed", "Done", "Removed"}
 NOME_MAX = 60
@@ -33,13 +36,14 @@ def formulario(cat: dict) -> Formulario:
         id=ID,
         nome="Novo serviço",
         descricao="Cria um serviço a partir de um golden path (repositório, esteira e padrões prontos)",
-        titulo="[novo-servico] ",
+        titulo=f"[{ID}]",
         intro="""
 O pedido é validado assim que você envia. Se estiver tudo certo, o repositório é criado em
 poucos minutos e o link aparece nesta issue; se não, o bot explica o que corrigir.
 
 - **Quem pode pedir:** maintainers (tech leads) do time responsável.
 - **Nome do repositório:** `<sigla>-<produto>-<aplicação>`, montado a partir dos campos abaixo.
+- **Título:** não precisa mexer; o bot completa com o nome do repositório.
 - **Sigla, produto ou time:** as listas mostram todo o catálogo; a validação confere se o produto
   é da sigla e se o time é do produto. O que não aparece na lista é um PR em `catalogo/siglas.yaml`,
   revisado pela plataforma.
@@ -115,8 +119,8 @@ def validar(campos: dict, cat: dict) -> tuple[dict, list[str]]:
         erros.append(f"Golden path `{gp_id or '(vazio)'}` não está no catálogo "
                      f"(opções: {', '.join(f'`{g}`' for g in sorted(catalog.golden_paths(cat)))}).")
 
-    if re.fullmatch(WORK_ITEM_RE, work_item):
-        pedido["work_item"] = work_item
+    if m := re.fullmatch(WORK_ITEM_CAMPO_RE, work_item):
+        pedido["work_item"] = m.group(1)
     else:
         erros.append("Work item inválido: use o formato `AB#<número>` do Azure Boards.")
 
@@ -157,6 +161,10 @@ def autorizar(pedido: dict, gh, solicitante: str) -> list[str]:
         return []
     return [f"@{solicitante} não é maintainer do time `{pedido['time']}`. Só os maintainers (tech leads) "
             "do time podem pedir serviços para ele."]
+
+
+def titulo(pedido: dict) -> str | None:
+    return f"[{ID}] {pedido['nome']}" if pedido.get("nome") else None
 
 
 def resumo(pedido: dict) -> str:

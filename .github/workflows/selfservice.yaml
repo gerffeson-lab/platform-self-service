@@ -51,8 +51,7 @@ jobs:
       - name: Identificar a operação
         id: op
         env:
-          ISSUE_STATE: ${{ github.event.issue.state }}
-          LABELS: ${{ toJSON(github.event.issue.labels.*.name) }}
+          ISSUES_TOKEN: ${{ github.token }}
           INPUT_OPERACAO: ${{ inputs.operacao }}
         run: python3 -I scripts/cli.py operacao
 
@@ -77,6 +76,7 @@ jobs:
           AZDO_TOKEN: ${{ secrets.AZDO_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
           INPUT_DADOS: ${{ inputs.dados }}
           REQUESTER: ${{ github.event.issue.user.login || github.actor }}
           OPERACAO: ${{ steps.op.outputs.operacao }}

@@ -57,6 +57,15 @@ class ValidarTest(unittest.TestCase):
     def test_work_item(self):
         self.assertIn("Work item inválido", erros(**{"work-item": "123"})[0])
 
+    def test_work_item_que_o_github_virou_link(self):
+        campo = "[AB#12](https://dev.azure.com/acme/25f7c38e/_workitems/edit/12)"
+        pedido, errs = op.validar({**OK, "work-item": campo}, CAT)
+        self.assertEqual(errs, [])
+        self.assertEqual(pedido["work_item"], "AB#12")
+
+    def test_link_com_outro_texto_nao_passa(self):
+        self.assertIn("Work item inválido", erros(**{"work-item": "[AB#12](https://x) e AB#13"})[0])
+
     def test_descricao_em_uma_linha(self):
         self.assertEqual(op.validar({**OK, "descricao": "a\n\nb  c"}, CAT)[0]["descricao"], "a b c")
 

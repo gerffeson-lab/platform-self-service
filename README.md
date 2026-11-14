@@ -20,6 +20,8 @@ de alguém aprovar no meio de centenas de notificações.
    e o `AB#` do Azure Boards. Sigla, produto, time e golden path são listas do catálogo; só o
    nome da aplicação é livre.
 2. O repositório se chama **`<sigla>-<produto>-<aplicação>`** (ex.: `crt-credito-autorizador`).
+   O título da issue não precisa ser preenchido: o bot completa com o nome do repositório
+   (`[novo-servico] crt-credito-autorizador`).
 3. A validação roda na hora:
    - sigla no catálogo, produto da sigla e time do produto (o Issue Form não filtra uma lista
      pela outra, então a validação confere a combinação e diz quais são as opções válidas);
@@ -29,8 +31,9 @@ de alguém aprovar no meio de centenas de notificações.
    - `AB#` de um work item que **existe e está aberto** no Azure Boards (uma consulta só: o ID
      é único na organização do Azure DevOps, não precisa saber o projeto).
 4. Com erro, o bot comenta o que corrigir e marca `pedido-invalido`; **editar a issue**
-   revalida. Válido, o repositório é criado, o **time é mencionado** e a issue é fechada com
-   `concluido`.
+   revalida, quantas vezes for preciso. Válido, o repositório é criado, o **time é mencionado**
+   e a issue é fechada com `concluido`; depois disso, edições são ignoradas (vale o estado atual
+   da issue, inclusive para uma edição feita no meio da criação).
 
 O mesmo pedido pode vir por **Actions → selfservice → Run workflow** (`operacao` + `dados` em
 JSON). É a entrada para automações e para um portal IDP no futuro.
