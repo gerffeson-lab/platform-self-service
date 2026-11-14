@@ -17,7 +17,9 @@ from ..github import GitHubError
 
 ID = "novo-servico"
 APLICACAO_RE = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
-WORK_ITEM_RE = r"AB#[0-9]+"
+WORK_ITEM_RE = r"AB#([0-9]+)"
+# work item encerrado não serve de origem para um serviço novo
+ESTADOS_ENCERRADOS = {"Closed", "Done", "Removed"}
 NOME_MAX = 60
 # custom properties da org gravadas no repositório (alvo de rulesets e políticas da org)
 PROPRIEDADES = {"sigla": "sigla", "produto": "produto", "time": "time", "golden-path": "golden_path"}
@@ -122,9 +124,9 @@ def validar(campos: dict, cat: dict) -> tuple[dict, list[str]]:
     return pedido, erros
 
 
-def checar(pedido: dict, gh) -> list[str]:
-    """Regras que dependem do GitHub (com o token da App)."""
-    erros = []
+def checar(pedido: dict, gh, boards=None) -> list[str]:
+    """Regras que consultam o GitHub (token da App) e, se configurado, o Azure Boards."""
+    erros = _checar_work_item(pedido["work_item"], boards) if pedido.get("work_item") and boards else []
     if pedido.get("template") and not gh.exists(f"repos/{gh.org}/{pedido['template']}"):
         erros.append(f"O template `{pedido['template']}` do golden path `{pedido['golden_path']}` não existe "
                      "na organização (avise a plataforma).")
@@ -133,6 +135,17 @@ def checar(pedido: dict, gh) -> list[str]:
     if pedido.get("nome") and gh.exists(f"repos/{gh.org}/{pedido['nome']}"):
         erros.append(f"O repositório `{gh.org}/{pedido['nome']}` já existe.")
     return erros
+
+
+def _checar_work_item(work_item: str, boards) -> list[str]:
+    numero = int(re.fullmatch(WORK_ITEM_RE, work_item).group(1))
+    wi = boards.work_item(numero)
+    if wi is None:
+        return [f"O work item `{work_item}` não existe no Azure Boards (ou a plataforma não tem acesso a ele)."]
+    if wi.get("System.State") in ESTADOS_ENCERRADOS:
+        return [f"O work item `{work_item}` ({wi.get('System.Title', '')}) está `{wi['System.State']}`. "
+                "Use um work item aberto."]
+    return []
 
 
 def autorizar(pedido: dict, gh, solicitante: str) -> list[str]:
