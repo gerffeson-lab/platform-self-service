@@ -53,5 +53,13 @@ class GitHub:
             args += ["--remove-label", remove]
         self.gh(*args, check=not remove)  # remover label ausente não é erro
 
+    def issue(self, repo: str, number: str) -> dict:
+        """Estado atual da issue: {"state": "open"|"closed", "labels": [...], "title": ...}."""
+        data = json.loads(self.gh("issue", "view", number, "--repo", repo, "--json", "state,labels,title").stdout)
+        return {"state": data["state"].lower(), "labels": [lb["name"] for lb in data["labels"]], "title": data["title"]}
+
+    def title(self, repo: str, number: str, title: str) -> None:
+        self.gh("issue", "edit", number, "--repo", repo, "--title", title)
+
     def close(self, repo: str, number: str, reason: str) -> None:
         self.gh("issue", "close", number, "--repo", repo, "--reason", reason)

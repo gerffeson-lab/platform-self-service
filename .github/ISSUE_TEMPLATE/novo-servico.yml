@@ -1,7 +1,7 @@
 # GERADO por scripts/cli.py formularios a partir do catálogo. Não edite à mão.
 name: "Novo serviço"
 description: "Cria um serviço a partir de um golden path (repositório, esteira e padrões prontos)"
-title: "[novo-servico] "
+title: "[novo-servico]"
 labels: ["novo-servico"]
 body:
   - type: markdown
@@ -12,6 +12,7 @@ body:
 
         - **Quem pode pedir:** maintainers (tech leads) do time responsável.
         - **Nome do repositório:** `<sigla>-<produto>-<aplicação>`, montado a partir dos campos abaixo.
+        - **Título:** não precisa mexer; o bot completa com o nome do repositório.
         - **Sigla, produto ou time:** as listas mostram todo o catálogo; a validação confere se o produto
           é da sigla e se o time é do produto. O que não aparece na lista é um PR em `catalogo/siglas.yaml`,
           revisado pela plataforma.
