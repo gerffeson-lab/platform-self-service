@@ -1,9 +1,8 @@
 # Golden paths oferecidos no pedido de serviço novo.
 #
-# Cada golden path aponta para um repositório template da org. Se o template tiver o script
-# executável `.golden-path/personalizar`, o self-service roda esse script na raiz do repositório
-# gerado (sem token, com o pedido em variáveis GP_*) e depois apaga `.golden-path/`.
-# A personalização é de quem mantém o template; o self-service não sabe nada de linguagem.
+# Cada golden path aponta para um repositório template da org, copiado como está (sem script de
+# personalização): o template não carrega identidade de serviço. O dono (CODEOWNERS) é gravado
+# pelo self-service e o nome em runtime vem do deploy. O self-service não sabe nada de linguagem.
 #
 # Golden path novo = template na org + PR neste arquivo, revisado pela plataforma. No mesmo
 # PR, rode `python3 scripts/cli.py formularios` para atualizar os formulários.

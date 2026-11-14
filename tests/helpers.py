@@ -1,8 +1,11 @@
+import base64
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+
+from selfservice.github import GitHubError  # noqa: E402
 
 CAT = {
     "siglas": {
@@ -20,9 +23,10 @@ CAT = {
 class FakeGitHub:
     """Registra as chamadas; `existentes` são os paths que respondem 200."""
 
-    def __init__(self, existentes=(), papeis=None, rulesets=()):
+    def __init__(self, existentes=(), papeis=None, rulesets=(), arquivos=None):
         self.org, self.token = "acme", "t"
         self.existentes, self.papeis, self.rulesets = set(existentes), papeis or {}, list(rulesets)
+        self.arquivos = dict(arquivos or {})  # "repos/x/y/contents/<path>" -> texto
         self.chamadas, self.corpos = [], {}
 
     def exists(self, path):
@@ -40,4 +44,11 @@ class FakeGitHub:
         self.chamadas.append(("api", method, path))
         if body is not None:
             self.corpos[path] = body
+        if method == "GET" and "/contents/" in path:
+            chave = path.split("?")[0]
+            if chave not in self.arquivos:
+                raise GitHubError("404 Not Found")
+            return {"content": base64.b64encode(self.arquivos[chave].encode()).decode(), "sha": "sha-antigo"}
+        if method == "GET" and path.endswith("/git/ref/heads/main"):
+            return {"object": {"sha": "sha-main"}}
         return [{"name": n} for n in self.rulesets] if path.endswith("/rulesets") and method == "GET" else None

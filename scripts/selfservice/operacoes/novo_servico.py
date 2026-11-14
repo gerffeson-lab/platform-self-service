@@ -1,20 +1,19 @@
 """Operação novo-servico: cria o repositório <sigla>-<produto>-<aplicação> a partir do
 template do golden path escolhido, com time dono, GitFlow, ruleset e custom properties.
 
-A personalização do código (pacote, nomes etc.) é do template: se ele tiver o script
-`.golden-path/personalizar`, ele roda aqui, sem token no ambiente."""
+O template não carrega identidade de serviço, então nada no código é reescrito: o self-service
+só grava o time dono no CODEOWNERS (commit com o AB#) e cria a develop, tudo pela API.
+O nome em runtime (logs, traces, Kubernetes) vem do deploy, a partir do nome do repositório."""
 
+import base64
 import json
-import os
 import re
-import shutil
-import subprocess
-import tempfile
 import time
 from pathlib import Path
 
 from .. import catalog
 from ..forms import Campo, Formulario
+from ..github import GitHubError
 
 ID = "novo-servico"
 APLICACAO_RE = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
@@ -22,7 +21,7 @@ WORK_ITEM_RE = r"AB#[0-9]+"
 NOME_MAX = 60
 # custom properties da org gravadas no repositório (alvo de rulesets e políticas da org)
 PROPRIEDADES = {"sigla": "sigla", "produto": "produto", "time": "time", "golden-path": "golden_path"}
-PERSONALIZAR = Path(".golden-path") / "personalizar"
+CODEOWNERS = ".github/CODEOWNERS"
 RULESET = Path(__file__).resolve().parents[3] / "rulesets" / "gitflow.json"
 
 
@@ -151,7 +150,7 @@ def resumo(pedido: dict) -> str:
     return f"Criando `{pedido['nome']}` ({pedido['golden_path']}) para o time `{pedido['time']}`."
 
 
-def executar(pedido: dict, gh, cfg: dict, publicar=None, cat: dict | None = None) -> str:
+def executar(pedido: dict, gh, cfg: dict, cat: dict | None = None) -> str:
     """Idempotente: o "Re-run failed jobs" retoma de onde parou."""
     org, nome = gh.org, pedido["nome"]
     repo = f"{org}/{nome}"
@@ -164,8 +163,10 @@ def executar(pedido: dict, gh, cfg: dict, publicar=None, cat: dict | None = None
     gh.api(f"repos/{repo}/properties/values", "PATCH",
            {"properties": [{"property_name": p, "value": pedido[k]} for p, k in PROPRIEDADES.items()]})
 
+    _definir_dono(gh, repo, pedido)
     if not gh.exists(f"repos/{repo}/branches/develop"):
-        (publicar or _publicar)(gh, repo, pedido)
+        main = gh.api(f"repos/{repo}/git/ref/heads/main")["object"]["sha"]
+        gh.api(f"repos/{repo}/git/refs", "POST", {"ref": "refs/heads/develop", "sha": main})
 
     gh.gh("repo", "edit", repo, "--default-branch", "develop", "--delete-branch-on-merge",
           "--add-topic", "golden-path", "--add-topic", f"sigla-{pedido['sigla']}",
@@ -195,43 +196,17 @@ def _aguardar(pronto, tentativas: int = 30, intervalo: float = 2) -> None:
     raise TimeoutError("O repositório gerado do template não ficou pronto a tempo.")
 
 
-def _publicar(gh, repo: str, pedido: dict) -> None:
-    """Clona, personaliza (script do template) e publica main e develop (commit com o AB#)."""
-    env = {**os.environ, "GH_TOKEN": gh.token}
-    with tempfile.TemporaryDirectory() as tmp:
-        work = os.path.join(tmp, "repo")
-        gh.gh("auth", "setup-git")
-        gh.gh("repo", "clone", repo, work)
-        personalizar(work, pedido, gh.org)
-
-        def git(*args):
-            subprocess.run(["git", "-C", work, "-c", "user.name=platform-bot",
-                            "-c", "user.email=platform-bot@users.noreply.github.com", *args],
-                           check=True, env=env)
-
-        git("add", "-A")
-        git("commit", "--allow-empty", "-m", f"chore: cria {pedido['nome']} a partir do {pedido['template']}",
-            "-m", pedido["work_item"])
-        git("push", "origin", "HEAD:main")
-        git("push", "origin", "HEAD:refs/heads/develop")
-
-
-def personalizar(work: str, pedido: dict, org: str, run=subprocess.run) -> None:
-    """Roda o `.golden-path/personalizar` do template, se houver, e apaga `.golden-path/`.
-
-    O script é do template (mantido por quem mantém o golden path) e roda sem nenhum token
-    ou credencial no ambiente: só PATH, HOME e o pedido em variáveis GP_*."""
-    script = Path(work) / PERSONALIZAR
-    if script.is_file():
-        if not os.access(script, os.X_OK):
-            raise RuntimeError(f"{PERSONALIZAR} do template {pedido['template']} não é executável.")
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/tmp"),
-               "GP_ORG": org, "GP_NOME": pedido["nome"], "GP_SIGLA": pedido["sigla"],
-               "GP_PRODUTO": pedido["produto"], "GP_APLICACAO": pedido["aplicacao"],
-               "GP_TIME": pedido["time"], "GP_DESCRICAO": pedido.get("descricao", "")}
-        proc = run([str(script.resolve())], cwd=work, env=env, capture_output=True, text=True, timeout=300)
-        print(proc.stdout, end="")
-        if proc.returncode != 0:
-            raise RuntimeError(f"{PERSONALIZAR} do template {pedido['template']} falhou: "
-                               f"{proc.stderr.strip()[-500:]}")
-    shutil.rmtree(Path(work) / PERSONALIZAR.parent, ignore_errors=True)
+def _definir_dono(gh, repo: str, pedido: dict) -> None:
+    """CODEOWNERS com o time dono, na main; o commit leva o AB# do pedido (vínculo no Boards)."""
+    esperado = f"* @{gh.org}/{pedido['time']}\n"
+    try:
+        atual = gh.api(f"repos/{repo}/contents/{CODEOWNERS}?ref=main")
+    except GitHubError:
+        atual = None  # template sem CODEOWNERS
+    if atual and base64.b64decode(atual["content"]).decode("utf-8") == esperado:
+        return
+    corpo = {"message": f"chore: time {pedido['time']} é dono do serviço\n\n{pedido['work_item']}",
+             "content": base64.b64encode(esperado.encode("utf-8")).decode("ascii"), "branch": "main"}
+    if atual:
+        corpo["sha"] = atual["sha"]
+    gh.api(f"repos/{repo}/contents/{CODEOWNERS}", "PUT", corpo)
