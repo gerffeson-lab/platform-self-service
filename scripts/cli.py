@@ -9,6 +9,7 @@ Contrato com o workflow, por variáveis de ambiente:
     EVENT_NAME, ISSUE_NUMBER, ISSUE_BODY, ISSUE_STATE, LABELS (JSON), REQUESTER
     INPUT_OPERACAO, INPUT_DADOS (JSON)        no workflow_dispatch
     APP_TOKEN    token da GitHub App da plataforma (org: times, repositórios)
+    AZDO_ORG, AZDO_TOKEN   organização do Azure DevOps e token de leitura de work items (opcionais)
     ISSUES_TOKEN GITHUB_TOKEN do workflow (comentar e rotular as issues)
     PEDIDO (JSON), NEW_REPO_VISIBILITY, RUN_URL   no executar"""
 
@@ -19,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selfservice import catalog, forms  # noqa: E402
+from selfservice.boards import Boards, BoardsError  # noqa: E402
 from selfservice.github import GitHub  # noqa: E402
 from selfservice.operacoes import OPERACOES  # noqa: E402
 
@@ -54,6 +56,17 @@ def app() -> GitHub:
     return GitHub(ENV["APP_TOKEN"], ENV["GITHUB_REPOSITORY_OWNER"])
 
 
+def boards() -> Boards | None:
+    """Sem AZDO_ORG e AZDO_TOKEN, o work item só tem o formato conferido."""
+    org, token = ENV.get("AZDO_ORG", ""), ENV.get("AZDO_TOKEN", "")
+    if bool(org) != bool(token):
+        raise SystemExit("::error::Configure AZDO_ORG e AZDO_TOKEN juntos (ou nenhum dos dois).")
+    if not org:
+        print("::warning::Azure Boards não configurado: o work item só tem o formato conferido.")
+        return None
+    return Boards(org, token)
+
+
 def lista(erros: list[str]) -> str:
     return "\n".join(f"- {e}" for e in erros)
 
@@ -85,7 +98,15 @@ def cmd_validar(op: str) -> int:
     pedido, erros = mod.validar({k: v.strip() for k, v in campos.items()}, cat)
 
     gh = app()
-    erros += mod.checar(pedido, gh)
+    try:
+        erros += mod.checar(pedido, gh, boards())
+    except BoardsError as exc:  # falha de infraestrutura: não culpa o pedido
+        print(f"::error::{exc}")
+        if is_issue():
+            issues().comment(ENV["GITHUB_REPOSITORY"], ENV["ISSUE_NUMBER"],
+                             "⚠️ Não foi possível consultar o Azure Boards agora; a plataforma foi avisada. "
+                             f"Detalhes: {ENV.get('RUN_URL', '')}")
+        return 1
     nao_autorizado = mod.autorizar(pedido, gh, ENV.get("REQUESTER", ""))
 
     if not erros and not nao_autorizado:
