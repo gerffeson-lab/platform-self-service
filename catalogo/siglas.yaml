@@ -12,6 +12,12 @@
 # Siglas e times desta POC são fictícios.
 
 siglas:
+  bas:
+    descricao: Engenharia de plataforma (significado da sigla a confirmar com a Arquitetura)
+    produtos:
+      plataforma:
+        descricao: Esteira, self-service, templates e GitOps da plataforma
+        times: [plataforma]
   crt:
     descricao: Cartões
     produtos:

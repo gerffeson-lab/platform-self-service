@@ -22,6 +22,7 @@ body:
       label: "Sigla"
       description: "Sigla do sistema"
       options:
+        - "bas"
         - "crt"
     validations:
       required: true
@@ -32,6 +33,7 @@ body:
       description: "Produto da sigla escolhida"
       options:
         - "credito"
+        - "plataforma"
     validations:
       required: true
   - type: input
@@ -49,6 +51,7 @@ body:
       description: "Precisa ser um time do produto. Recebe acesso de escrita e vira CODEOWNER"
       options:
         - "pagamentos"
+        - "plataforma"
     validations:
       required: true
   - type: dropdown
